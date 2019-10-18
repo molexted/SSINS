@@ -109,8 +109,17 @@ class SS(UVData):
             if self.blt_order is not 'bda':
                 warnings.warn("More than 1 integration time. Reordering blt axis according to BDA.")
                 self.reorder_blts(order='bda')
+
             arrs = []
             flag_arrs = []
+            ant_1_arrs = []
+            ant_2_arrs = []
+            bl_arrs = []
+            int_time_arrs = []
+            nsample_arrs = []
+            time_arrs = []
+            uvw_arrs = []
+
             cusum = np.insert(np.cumsum(counts), 0, 0)
             for int_time_ind in np.arange(N_int_times):
                 bls_int, Nbls_int = np.unique(self.baseline_array[int_time_slice], return_counts=True)
@@ -126,7 +135,7 @@ class SS(UVData):
                                                Ntimes_int,
                                                self.Nspws,
                                                self.Nfreqs,
-                                               self.Npols], axis=1).reshape([counts[int_time_ind] - Nbls_int,
+                                               self.Npols], axis=1).reshape([Nbls_int * (Ntimes_int - 1),
                                                                              self.Nspws,
                                                                              self.Nfreqs,
                                                                              self.Npols]))
@@ -139,8 +148,34 @@ class SS(UVData):
                     flag_arr = flag_arr.reshape([counts[int_time_ind] - Nbls_int,
                                                  self.Nspws, self.Nfreqs, self.Npols])
 
+                    bl_arr = self.baseline_array[int_time_slice].reshape([Nbls_int, Ntimes_int])[:, :-1].reshape(Nbls_int * (Ntimes_int - 1))
+                    int_time_arr = self.integration_times[int_time_slice].reshape([Nbls_int, Ntimes_int])
+                    int_time_arr = (int_time_arr[:, 1:] + int_time_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+
+                    nsample_arr = self.nsample_array[int_time_slice].reshape([Nbls_int,
+                                                                              Ntimes_int,
+                                                                              self.Nspws,
+                                                                              self.Nfreqs,
+                                                                              self.Npols])
+
+                    nsample_arr = 0.5 * (nsample_arr[:, :-1] + nsample_arr[:, 1:]).reshape([Nbls_int * (Ntimes_int - 1),
+                                                                                            self.Nspws,
+                                                                                            self.Nfreqs,
+                                                                                            self.Npols])
+                    time_arr = self.time_array[int_time_slice].reshape([Nbls_int, Ntimes_int])
+                    time_arr = 0.5 * (time_arr[:, 1:] + time_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+
+                    uvw_arr = self.uvw_array[int_time_slice].reshape([Nbls_int, Ntimes_int])
+                    uvw_arr = 0.5 * (uvw_arr[:, 1:] + uvw_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+
                     arrs.append(arr)
                     flag_arrs.append(flag_arr)
+                    bl_arrs.append(bl_arr)
+                    int_time_arrs.append(int_time_arr)
+                    nsample_arrs.append(nsample_arr)
+                    time_arrs.append(time_arr)
+                    uvw_arrs.append(uvw_arr)
+
                 else:
                     for bl in bls_int:
                         arr = np.diff(self.get_data(bl), axis=0)
@@ -162,13 +197,9 @@ class SS(UVData):
             self.flag_array = np.logical_or(self.flag_array[self.Nbls:], self.flag_array[:-self.Nbls])
             """The flag array, which results from boolean OR of the flags corresponding to visibilities that are differenced from one another."""
 
-            self.ant_1_array = self.ant_1_array[:-self.Nbls]
-            self.ant_2_array = self.ant_2_array[:-self.Nbls]
             self.baseline_array = self.baseline_array[:-self.Nbls]
             self.integration_time = self.integration_time[self.Nbls:] + self.integration_time[:-self.Nbls]
             """Total amount of integration time (sum of the differenced visibilities) at each baseline-time (length Nblts)"""
-            self.Ntimes -= 1
-            """Total number of integration times in the data. Equal to the original Ntimes-1."""
             self.nsample_array = 0.5 * (self.nsample_array[self.Nbls:] + self.nsample_array[:-self.Nbls])
             """See pyuvdata documentation. Here we average the nsample_array of the visibilities that are differenced"""
             self.time_array = 0.5 * (self.time_array[self.Nbls:] + self.time_array[:-self.Nbls])
@@ -191,6 +222,9 @@ class SS(UVData):
         # Adjust the UVData attributes.
         self.Nblts -= self.Nbls
         """Number of baseline-times."""
+        self.Ntimes = len(np.unique(self.time_array))
+        """Total number of times in the data."""
+        self.ant_1_array, self.ant_2_array = self.baseline_to_antnums(self.baseline_array)
 
         super(SS, self).set_lsts_from_time_array()
 
