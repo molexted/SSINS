@@ -99,33 +99,99 @@ class SS(UVData):
         attributes are also adjusted so that the resulting SS object passes
         UVData.check()
         """
+        # Check how many integration times there are
+        int_times, counts = np.unique(self.integration_times, return_counts=True)
+        N_int_times = len(int_times)
+        cusum = np.insert(np.cumsum(counts), 0, 0)
 
-        assert self.Nblts == self.Nbls * self.Ntimes, 'Nblts != Nbls * Ntimes'
-        cond = np.all([self.baseline_array[:self.Nbls] == self.baseline_array[k * self.Nbls:(k + 1) * self.Nbls]
-                       for k in range(1, self.Ntimes - 1)])
-        assert cond, 'Baseline array slices do not match in each time! The baselines are out of order.'
+        if N_int_times > 1:
+            # If baseline-dependent averaging, reorder axes
+            if self.blt_order is not 'bda':
+                warnings.warn("More than 1 integration time. Reordering blt axis according to BDA.")
+                self.reorder_blts(order='bda')
+            arrs = []
+            flag_arrs = []
+            cusum = np.insert(np.cumsum(counts), 0, 0)
+            for int_time_ind in np.arange(N_int_times):
+                bls_int, Nbls_int = np.unique(self.baseline_array[int_time_slice], return_counts=True)
+                if Nbls_int * Ntimes_int == counts[int_time_ind]:
+                    int_time_slice = slice(cusum[int_time_ind], cusum[int_time_ind + 1])
 
-        # Difference in time and OR the flags
-        self.data_array = np.ma.masked_array(self.data_array[self.Nbls:] - self.data_array[:-self.Nbls])
-        """The time-differenced visibilities. Complex array of shape (Nblts, Nspws, Nfreqs, Npols)."""
-        self.flag_array = np.logical_or(self.flag_array[self.Nbls:], self.flag_array[:-self.Nbls])
-        """The flag array, which results from boolean OR of the flags corresponding to visibilities that are differenced from one another."""
+                    _, Ntimes_int = np.unique(self.time_array[int_time_slice], return_counts=True)
+                    arr = self.data_array[int_time_slice]
+                    flag_arr = self.flag_array[int_time_slice]
+
+                    # reshape data array, difference, reshape back
+                    arr = np.diff(arr.reshape([Nbls_int,
+                                               Ntimes_int,
+                                               self.Nspws,
+                                               self.Nfreqs,
+                                               self.Npols], axis=1).reshape([counts[int_time_ind] - Nbls_int,
+                                                                             self.Nspws,
+                                                                             self.Nfreqs,
+                                                                             self.Npols]))
+
+                    # reshape flag array, OR, reshape back
+                    flag_arr = flag_arr.reshape([Nbls_int, Ntimes_int,
+                                                 self.Nspws, self.Nfreqs,
+                                                 self.Npols])
+                    flag_arr = np.logical_or(flag_arr[:, 1:], flag_arr[:, :-1])
+                    flag_arr = flag_arr.reshape([counts[int_time_ind] - Nbls_int,
+                                                 self.Nspws, self.Nfreqs, self.Npols])
+
+                    arrs.append(arr)
+                    flag_arrs.append(flag_arr)
+                else:
+                    for bl in bls_int:
+                        arr = np.diff(self.get_data(bl), axis=0)
+                        flag_arr = self.get_flags(bl)
+                        flag_arr = np.logical_or(flag_arr[1:], flag_arr[:-1])
+
+                        arrs.append(arr)
+                        flag_arrs.append(flag_arr)
+            self.data_array = np.ma.masked_array(np.concatenate(arrs))
+            self.flag_array = np.concatenate(flag_arrs)
+
+        elif (self.Nblts == self.Nbls * self.Ntimes):
+            if self.blt_order is not 'time':
+                warnings.warn("Setting blt-axis to (time, baseline) order")
+                self.reorder_blts(order='time')
+            # Every baseline reported at all times, so we can assume something about the shape of the sorted array to do a fast difference
+            self.data_array = np.ma.masked_array(self.data_array[self.Nbls:] - self.data_array[:-self.Nbls])
+            """The time-differenced visibilities. Complex array of shape (Nblts, Nspws, Nfreqs, Npols)."""
+            self.flag_array = np.logical_or(self.flag_array[self.Nbls:], self.flag_array[:-self.Nbls])
+            """The flag array, which results from boolean OR of the flags corresponding to visibilities that are differenced from one another."""
+
+            self.ant_1_array = self.ant_1_array[:-self.Nbls]
+            self.ant_2_array = self.ant_2_array[:-self.Nbls]
+            self.baseline_array = self.baseline_array[:-self.Nbls]
+            self.integration_time = self.integration_time[self.Nbls:] + self.integration_time[:-self.Nbls]
+            """Total amount of integration time (sum of the differenced visibilities) at each baseline-time (length Nblts)"""
+            self.Ntimes -= 1
+            """Total number of integration times in the data. Equal to the original Ntimes-1."""
+            self.nsample_array = 0.5 * (self.nsample_array[self.Nbls:] + self.nsample_array[:-self.Nbls])
+            """See pyuvdata documentation. Here we average the nsample_array of the visibilities that are differenced"""
+            self.time_array = 0.5 * (self.time_array[self.Nbls:] + self.time_array[:-self.Nbls])
+            """The center time of the differenced visibilities. Length Nblts."""
+            self.uvw_array = 0.5 * (self.uvw_array[self.Nbls:] + self.uvw_array[:-self.Nbls])
+        else:
+            if self.blt_order is not 'baseline':
+                warnings.warn("Setting blt-axis to (baseline, time) order")
+                self.reorder_blts(order='baseline', minor_order='time')
+            arrs = []
+            for bl in np.unique(self.baseline_array):
+                arr = np.diff(self.get_data(bl), axis=0)
+                flag_arr = self.get_flags(bl)
+                flag_arr = np.logical_or(flag_arr[1:], flag_arr[:-1])
+                arrs.append(arr)
+                flag_arrs.append(flag_arr)
+            self.data_array = np.ma.masked_array(np.concatenate(arrs))
+            self.flag_array = np.concatenate(flag_arrs)
 
         # Adjust the UVData attributes.
         self.Nblts -= self.Nbls
-        """Number of baseline-times. For now, this must be equal to the number of baselines times the number of times."""
-        self.ant_1_array = self.ant_1_array[:-self.Nbls]
-        self.ant_2_array = self.ant_2_array[:-self.Nbls]
-        self.baseline_array = self.baseline_array[:-self.Nbls]
-        self.integration_time = self.integration_time[self.Nbls:] + self.integration_time[:-self.Nbls]
-        """Total amount of integration time (sum of the differenced visibilities) at each baseline-time (length Nblts)"""
-        self.Ntimes -= 1
-        """Total number of integration times in the data. Equal to the original Ntimes-1."""
-        self.nsample_array = 0.5 * (self.nsample_array[self.Nbls:] + self.nsample_array[:-self.Nbls])
-        """See pyuvdata documentation. Here we average the nsample_array of the visibilities that are differenced"""
-        self.time_array = 0.5 * (self.time_array[self.Nbls:] + self.time_array[:-self.Nbls])
-        """The center time of the differenced visibilities. Length Nblts."""
-        self.uvw_array = 0.5 * (self.uvw_array[self.Nbls:] + self.uvw_array[:-self.Nbls])
+        """Number of baseline-times."""
+
         super(SS, self).set_lsts_from_time_array()
 
     def MLE_calc(self):
