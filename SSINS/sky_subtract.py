@@ -112,8 +112,6 @@ class SS(UVData):
 
             arrs = []
             flag_arrs = []
-            ant_1_arrs = []
-            ant_2_arrs = []
             bl_arrs = []
             int_time_arrs = []
             nsample_arrs = []
@@ -130,43 +128,28 @@ class SS(UVData):
                     arr = self.data_array[int_time_slice]
                     flag_arr = self.flag_array[int_time_slice]
 
+                    re_shape = [Nbls_int, Ntimes_int, self.Nspws, self.Nfreqs, self.Npols]
+                    diff_shape = [Nbls_int * (Ntimes_int - 1), self.Nspws,
+                                  self.Nfreqs, self.Npols]
                     # reshape data array, difference, reshape back
-                    arr = np.diff(arr.reshape([Nbls_int,
-                                               Ntimes_int,
-                                               self.Nspws,
-                                               self.Nfreqs,
-                                               self.Npols], axis=1).reshape([Nbls_int * (Ntimes_int - 1),
-                                                                             self.Nspws,
-                                                                             self.Nfreqs,
-                                                                             self.Npols]))
+                    arr = np.diff(arr.reshape(re_shape, axis=1).reshape(diff_shape))
 
                     # reshape flag array, OR, reshape back
-                    flag_arr = flag_arr.reshape([Nbls_int, Ntimes_int,
-                                                 self.Nspws, self.Nfreqs,
-                                                 self.Npols])
+                    flag_arr = flag_arr.reshape(re_shape)
                     flag_arr = np.logical_or(flag_arr[:, 1:], flag_arr[:, :-1])
-                    flag_arr = flag_arr.reshape([counts[int_time_ind] - Nbls_int,
-                                                 self.Nspws, self.Nfreqs, self.Npols])
+                    flag_arr = flag_arr.reshape(diff_shape)
 
-                    bl_arr = self.baseline_array[int_time_slice].reshape([Nbls_int, Ntimes_int])[:, :-1].reshape(Nbls_int * (Ntimes_int - 1))
-                    int_time_arr = self.integration_times[int_time_slice].reshape([Nbls_int, Ntimes_int])
-                    int_time_arr = (int_time_arr[:, 1:] + int_time_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+                    bl_arr = self.baseline_array[int_time_slice].reshape(re_shape[:2])[:, :-1].reshape(diff_shape[0])
+                    int_time_arr = self.integration_times[int_time_slice].reshape(re_shape[:2])[:, -1].reshape(diff_shape[0])
 
-                    nsample_arr = self.nsample_array[int_time_slice].reshape([Nbls_int,
-                                                                              Ntimes_int,
-                                                                              self.Nspws,
-                                                                              self.Nfreqs,
-                                                                              self.Npols])
+                    nsample_arr = self.nsample_array[int_time_slice].reshape(re_shape)
+                    nsample_arr = (nsample_arr[:, :-1] + nsample_arr[:, 1:]).reshape(diff_shape)
 
-                    nsample_arr = 0.5 * (nsample_arr[:, :-1] + nsample_arr[:, 1:]).reshape([Nbls_int * (Ntimes_int - 1),
-                                                                                            self.Nspws,
-                                                                                            self.Nfreqs,
-                                                                                            self.Npols])
-                    time_arr = self.time_array[int_time_slice].reshape([Nbls_int, Ntimes_int])
-                    time_arr = 0.5 * (time_arr[:, 1:] + time_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+                    time_arr = self.time_array[int_time_slice].reshape(re_shape[:2])
+                    time_arr = 0.5 * (time_arr[:, 1:] + time_arr[:, :-1]).reshape(diff_shape[0])
 
-                    uvw_arr = self.uvw_array[int_time_slice].reshape([Nbls_int, Ntimes_int])
-                    uvw_arr = 0.5 * (uvw_arr[:, 1:] + uvw_arr[:, :-1]).reshape(Nbls_int * (Ntimes_int - 1))
+                    uvw_arr = self.uvw_array[int_time_slice].reshape(re_shape[:2])
+                    uvw_arr = 0.5 * (uvw_arr[:, 1:] + uvw_arr[:, :-1]).reshape(diff_shape[0])
 
                     arrs.append(arr)
                     flag_arrs.append(flag_arr)
@@ -181,11 +164,31 @@ class SS(UVData):
                         arr = np.diff(self.get_data(bl), axis=0)
                         flag_arr = self.get_flags(bl)
                         flag_arr = np.logical_or(flag_arr[1:], flag_arr[:-1])
+                        nsample_arr = self.get_nsamples(bl)
+                        nsample_arr = nsample_arr[1:] + nsample_arr[:-1]
+
+                        time_arr = self.get_times(bl)
+                        uvw_arr = uvw_arr[self.baseline_array == bl]
+                        uvw_arr = 0.5 * (uvw_arr[:-1] + uvw_arr[1:])
+
+                        Nt_bl = len(time_arr)
+                        bl_arr = np.full(Nt_bl, bl)
+                        int_time_arr = np.full(Nt_bl, integration_times[int_time_ind])
 
                         arrs.append(arr)
                         flag_arrs.append(flag_arr)
+                        bl_arrs.append(bl_arr)
+                        nsample_arrs.append(nsample_arr)
+                        time_arrs.append(time_arr)
+                        uvw_arrs.append(uvw_arr)
+
             self.data_array = np.ma.masked_array(np.concatenate(arrs))
             self.flag_array = np.concatenate(flag_arrs)
+            self.baseline_array = np.concatenate(bl_arrs)
+            self.integration_time = np.concatenate(int_time_arrs)
+            self.nsample_array = np.concatenate(nsample_arrs)
+            self.time_array = np.concatenate(time_arrs)
+            self.uvw_array = np.concatenate(uvw_arrs)
 
         elif (self.Nblts == self.Nbls * self.Ntimes):
             if self.blt_order is not 'time':
@@ -198,9 +201,9 @@ class SS(UVData):
             """The flag array, which results from boolean OR of the flags corresponding to visibilities that are differenced from one another."""
 
             self.baseline_array = self.baseline_array[:-self.Nbls]
-            self.integration_time = self.integration_time[self.Nbls:] + self.integration_time[:-self.Nbls]
+            self.integration_time = self.integration_time[:-self.Nbls]
             """Total amount of integration time (sum of the differenced visibilities) at each baseline-time (length Nblts)"""
-            self.nsample_array = 0.5 * (self.nsample_array[self.Nbls:] + self.nsample_array[:-self.Nbls])
+            self.nsample_array = self.nsample_array[self.Nbls:] + self.nsample_array[:-self.Nbls]
             """See pyuvdata documentation. Here we average the nsample_array of the visibilities that are differenced"""
             self.time_array = 0.5 * (self.time_array[self.Nbls:] + self.time_array[:-self.Nbls])
             """The center time of the differenced visibilities. Length Nblts."""
@@ -214,10 +217,31 @@ class SS(UVData):
                 arr = np.diff(self.get_data(bl), axis=0)
                 flag_arr = self.get_flags(bl)
                 flag_arr = np.logical_or(flag_arr[1:], flag_arr[:-1])
+
+                nsample_arr = self.get_nsamples(bl)
+                nsample_arr = nsample_arr[1:] + nsample_arr[:-1]
+
+                time_arr = self.get_times(bl)
+                uvw_arr = uvw_arr[self.baseline_array == bl]
+                uvw_arr = 0.5 * (uvw_arr[:-1] + uvw_arr[1:])
+
+                Nt_bl = len(time_arr)
+                bl_arr = np.full(Nt_bl, bl)
+                int_time_arr = np.full(Nt_bl, integration_times[int_time_ind])
+
                 arrs.append(arr)
                 flag_arrs.append(flag_arr)
+                bl_arrs.append(bl_arr)
+                nsample_arrs.append(nsample_arr)
+                time_arrs.append(time_arr)
+                uvw_arrs.append(uvw_arr)
             self.data_array = np.ma.masked_array(np.concatenate(arrs))
             self.flag_array = np.concatenate(flag_arrs)
+            self.baseline_array = np.concatenate(bl_arrs)
+            self.integration_time = np.concatenate(int_time_arrs)
+            self.nsample_array = np.concatenate(nsample_arrs)
+            self.time_array = np.concatenate(time_arrs)
+            self.uvw_array = np.concatenate(uvw_arrs)
 
         # Adjust the UVData attributes.
         self.Nblts -= self.Nbls
