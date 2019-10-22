@@ -34,14 +34,17 @@ class INS(UVFlag):
         """
 
         super(INS, self).__init__(input, mode='metric', copy_flags=False,
-                                  waterfall=False, history='', label='')
+                                  waterfall=False, history='', label='',
+                                  use_nsamples=True)
         if self.type is 'baseline':
-
             # Manually flag autos
             input.data_array[input.ant_1_array == input.ant_2_array] = np.ma.masked
             self.metric_array = np.abs(input.data_array)
             """The baseline-averaged sky-subtracted visibility amplitudes (numpy masked array)"""
             self.weights_array = np.logical_not(input.data_array.mask)
+            if use_nsamples:
+                self.weights_array *= self.nsample_array
+            # Need sum of squares of weights to continue
             """The number of baselines that contributed to each element of the metric_array"""
             super(INS, self).to_waterfall(method='mean')
         if not hasattr(self.metric_array, 'mask'):
@@ -89,7 +92,7 @@ class INS(UVFlag):
         # describes the ratio of its rms to its mean
         C = 4 / np.pi - 1
         if not self.order:
-            coeffs = self.metric_array[:, freq_slice].mean(axis=0)
+            coeffs = self.metric_array[:, freq_slice].average(axis=0, weights=self.weights_array)
             MS = (self.metric_array[:, freq_slice] / coeffs - 1) * np.sqrt(self.weights_array[:, freq_slice] / C)
         else:
             MS = np.zeros_like(self.metric_array[:, freq_slice])
