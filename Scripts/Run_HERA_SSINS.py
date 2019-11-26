@@ -1,22 +1,24 @@
-from SSINS import SS, INS, version, MF
+from SSINS import SS, INS, version, MF, util
 from functools import reduce
 import numpy as np
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", "--filename", help="The visibility file to process")
+parser.add_argument("-f", "--filelist", help="A textfile that lists visibility data files to process")
 parser.add_argument("-s", "--streak_sig", type=float, help="The desired streak significance threshold")
 parser.add_argument("-o", "--other_sig", type=float, help="The desired significance threshold for other shapes")
 parser.add_argument("-p", "--prefix", help="The prefix for output files")
 parser.add_argument("-N", "--N_samp_thresh", type=int, help="The N_samp_thresh parameter for the match filter")
 args = parser.parse_args()
 
+filelist = util.make_obslist(args.filelist)
+
 version_info_list = ['%s: %s, ' % (key, version.version_info[key]) for key in version.version_info]
 version_hist_substr = reduce(lambda x, y: x + y, version_info_list)
 
 # Make the SS object
 ss = SS()
-ss.read(args.filename, ant_str='cross')
+ss.read(filelist, ant_str='cross')
 
 # Make the INS object
 ins = INS(ss)
