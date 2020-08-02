@@ -197,7 +197,7 @@ class INS(UVFlag):
                         w = self.weights_array[:, chan, pol_ind]
                         w_sq = self.weights_square_array[:, chan, pol_ind]
                         # Make the fit
-                        coeff = np.ma.polyfit(x, y, self.order, w=w)
+                        coeff = np.polynomial.polynomial.Polynomial.fit(x, y, self.order, w=w)
                         coeffs[:, chan, pol_ind] = coeff
                         # Do the magic
                         mu = np.sum([coeff[poly_ind] * x**(self.order - poly_ind)
